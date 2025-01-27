@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useState } from "react";
 import { Layer, Marker, Source } from "react-map-gl";
 import {
   transformRotate,
@@ -10,114 +10,165 @@ import {
   lineString,
   transformTranslate,
   distance,
+  featureCollection,
+  nearestPointToLine,
 } from "@turf/turf";
+import {
+  PolygonDerivativeLine,
+  PolygonDerivativePoint,
+  PolygonObj,
+} from "./MapContainer";
+
+import { uniqBy } from "lodash";
 
 export type FeaturePolygonWithProps = GeoJSON.Feature & {
   geometry: GeoJSON.Polygon;
   properties: {
-    id: number;
-    imageLink: string;
+    id: string;
     type: string;
   };
 };
 
 type CustomPolygonProps = {
-  id: number;
-  image: string;
-  geojson: GeoJSON.Feature;
+  id: string;
+  geojson: PolygonObj;
+  points: PolygonDerivativePoint[];
+  lines: PolygonDerivativeLine[];
   label: string;
-  active: boolean;
+  snapRadiusMetres: number;
   onDelete: () => void;
+  onUpdate: (polygonData: PolygonObj) => void;
+  onIntersectingPointsUpdate: (points: PolygonDerivativePoint[]) => void;
+  onIntersectingLinesUpdate: (lines: PolygonDerivativeLine[]) => void;
 };
 
 export const CustomPolygon = ({
   id,
-  image,
   geojson,
   label,
-  active,
+  lines,
+  points,
+  snapRadiusMetres,
   onDelete,
+  onIntersectingPointsUpdate,
+  onIntersectingLinesUpdate,
+  onUpdate,
 }: CustomPolygonProps) => {
-  const initialData = {
-    type: "FeatureCollection",
-    features: [geojson],
-  } as GeoJSON.FeatureCollection;
-
-  const [rotation, setRotation] = useState(0);
-  const [data, setData] = useState(initialData);
-  const [imageCoordinates, setImageCoordinates] = useState(
-    (initialData.features[0].geometry as GeoJSON.Polygon).coordinates[0].slice(
-      0,
-      4
-    )
-  );
-
   const polygonCenter = useMemo(
-    () => getCoord(centroid(data.features[0])),
-    [data]
+    () => getCoord(centroid(geojson.feature)),
+    [geojson]
   );
 
-  const rotatedData = useMemo(() => {
-    return {
-      ...data,
-      features: [
-        transformRotate(data.features[0], rotation, { pivot: polygonCenter }),
-      ],
-    } as GeoJSON.FeatureCollection;
-  }, [rotation, data, polygonCenter]);
+  const rotatedData = useMemo(
+    () =>
+      transformRotate(geojson.feature, geojson.angle, { pivot: polygonCenter }),
+    [geojson, polygonCenter]
+  );
 
-  const markerPosition = useMemo(() => {
-    return destination(point(polygonCenter), 20, rotation, {
-      units: "meters",
-    }).geometry.coordinates;
-  }, [polygonCenter, rotation]);
+  const markerPosition = useMemo(
+    () =>
+      destination(point(polygonCenter), 20, geojson.angle, {
+        units: "meters",
+      }).geometry.coordinates,
+    [polygonCenter, geojson.angle]
+  );
 
-  const lineData = useMemo(() => {
-    return {
-      type: "FeatureCollection",
-      features: [lineString([polygonCenter, markerPosition])],
-    } as GeoJSON.FeatureCollection;
-  }, [polygonCenter, markerPosition]);
+  const lineData = useMemo(
+    () => lineString([polygonCenter, markerPosition]),
+    [polygonCenter, markerPosition]
+  );
 
   const handleMarkerDrag = useCallback(
     (event: any) => {
       const { lngLat } = event;
       const newPosition = [lngLat.lng, lngLat.lat];
       const newRotation = bearing(polygonCenter, newPosition);
-      setRotation(newRotation);
+      onUpdate({ ...geojson, angle: newRotation });
     },
-    [polygonCenter]
+    [polygonCenter, onUpdate]
   );
+
+  const intersectingPoints = useMemo(() => {
+    // find all points (not including the points of this polygon) that intersect with the lines of this polygon
+    const otherPoints = points.filter((point) => point.polygonId !== id);
+    const uniqueOtherPoints = uniqBy(
+      otherPoints,
+      "feature.geometry.coordinates"
+    );
+    if (uniqueOtherPoints.length !== otherPoints.length) {
+      console.log("removed duplicate points", otherPoints, uniqueOtherPoints);
+    }
+    const pts = featureCollection(
+      uniqueOtherPoints.map((point) => point.feature)
+    );
+    const linesToCheck = lines.filter((line) => line.polygonId === id);
+
+    const intersectingLines: PolygonDerivativeLine[] = [];
+    const intersectingPoints = linesToCheck.flatMap((line) => {
+      const closestPoint = nearestPointToLine(pts, line.feature, {
+        units: "meters",
+      });
+
+      if (closestPoint.properties.dist < snapRadiusMetres) {
+        intersectingLines.push(line);
+        return [closestPoint];
+      }
+
+      return [];
+    });
+
+    if (geojson.active) {
+      console.log("found intersecting points", intersectingPoints);
+      console.log("found intersecting lines", intersectingLines);
+      onIntersectingPointsUpdate(
+        intersectingPoints.map((point) => ({
+          feature: point,
+          polygonId: id,
+        }))
+      );
+      onIntersectingLinesUpdate(intersectingLines);
+    }
+
+    return intersectingPoints;
+  }, [geojson.active, points, lines]);
 
   const handlePolygonDrag = useCallback(
     (event: any) => {
       const { lngLat } = event;
+
       const newCenter = [lngLat.lng, lngLat.lat];
-      const newData = {
-        ...data,
-        features: [
-          transformTranslate(
-            data.features[0],
-            distance(point(polygonCenter), point(newCenter)),
-            bearing(polygonCenter, newCenter)
-          ),
-        ],
-      } as GeoJSON.FeatureCollection;
 
-      setData(newData);
+      if (intersectingPoints.length > 0) {
+        const snapPoint = intersectingPoints[0];
+        const distanceToSnapPoint = snapPoint.properties.dist;
+        const bearingToSnapPoint = bearing(polygonCenter, getCoord(snapPoint));
+
+        const newSnappedCenter = destination(
+          point(polygonCenter),
+          distanceToSnapPoint,
+          bearingToSnapPoint,
+          {
+            units: "meters",
+          }
+        ).geometry.coordinates;
+      }
+
+      const newData = transformTranslate(
+        geojson.feature,
+        distance(point(polygonCenter), point(newCenter)),
+        bearing(polygonCenter, newCenter)
+      );
+
+      onUpdate({ ...geojson, feature: newData });
     },
-    [data, polygonCenter]
+    [
+      geojson,
+      polygonCenter,
+      intersectingPoints,
+      onUpdate,
+      onIntersectingPointsUpdate,
+    ]
   );
-
-  const updateImageLayer = () => {
-    setImageCoordinates(
-      (
-        rotatedData.features[0].geometry as GeoJSON.Polygon
-      ).coordinates[0].slice(0, 4)
-    );
-  };
-
-  console.log("active", active);
 
   return (
     <div className="border border-blue-800">
@@ -131,17 +182,7 @@ export const CustomPolygon = ({
         />
       </Source>
 
-      <Source type="image" url={image} coordinates={imageCoordinates}>
-        <Layer
-          type="raster"
-          paint={{
-            "raster-fade-duration": 0,
-            "raster-opacity": active ? 1 : 0.5,
-          }}
-        />
-      </Source>
-
-      {active && (
+      {geojson.active && (
         <>
           <Source type="geojson" data={lineData}>
             <Layer
@@ -158,7 +199,6 @@ export const CustomPolygon = ({
             latitude={polygonCenter[1]}
             draggable
             onDrag={handlePolygonDrag}
-            onDragEnd={updateImageLayer}
           >
             <div
               style={{
@@ -226,7 +266,7 @@ export const CustomPolygon = ({
                 color: "white",
               }}
             >
-              ID {label}
+              {label}
               <img
                 src="/delete-2-svgrepo-com.svg"
                 alt="Rotate"
@@ -245,7 +285,6 @@ export const CustomPolygon = ({
             latitude={markerPosition[1]}
             draggable
             onDrag={handleMarkerDrag}
-            onDragEnd={updateImageLayer}
           >
             <div
               style={{

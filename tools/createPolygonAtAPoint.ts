@@ -1,5 +1,6 @@
 import { FeaturePolygonWithProps } from "@/components/CustomPolygon";
 import * as turf from "@turf/turf";
+import { nanoid } from "nanoid";
 
 type PolygonOptions = {
   lat: number;
@@ -14,8 +15,6 @@ export const createPolygonAtAPoint = ({
   width,
   height,
 }: PolygonOptions) => {
-  console.log("lat,lng", lat, lng);
-
   const halfWidth = width / 2 / 1000;
   const halfHeight = height / 2 / 1000;
 
@@ -48,7 +47,7 @@ export const createPolygonAtAPoint = ({
   ];
 
   const polygon = turf.polygon([polygonCoords], {
-    id: new Date().getTime(),
+    id: nanoid(8),
     type: "FeaturePolygonWithProps",
   });
 
