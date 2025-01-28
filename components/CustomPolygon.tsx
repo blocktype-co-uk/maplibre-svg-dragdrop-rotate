@@ -104,15 +104,22 @@ export const CustomPolygon = ({
       const intersectingLines: PolygonDerivativeLine[] = [];
       const snapLines: PolygonDerivativeLine[] = [];
       const snapVectors: { dist: number; bearing: number }[] = [];
+      const seenLines: Set<string | number> = new Set();
+
       const intersectingPoints = otherPoints.filter((point) => {
-        return linesToCheck.some((line) => {
-          if (line.polygonId === point.polygonId) return false;
+        let foundIntersectingLine = false;
+
+        linesToCheck.forEach((line) => {
+          if (line.polygonId === point.polygonId || !line.feature.id) return;
 
           const closestPoint = nearestPointOnLine(line.feature, point.feature, {
             units: "meters",
           });
 
-          if (closestPoint.properties.dist < snapRadiusMetres) {
+          if (
+            closestPoint.properties.dist < snapRadiusMetres &&
+            !seenLines.has(line.feature.id)
+          ) {
             const snapVector = {
               dist: closestPoint.properties.dist,
               bearing: bearing(
@@ -121,6 +128,7 @@ export const CustomPolygon = ({
               ),
             };
             snapVectors.push(snapVector);
+            seenLines.add(line.feature.id);
 
             snapLines.push({
               feature: transformTranslate(
@@ -132,23 +140,23 @@ export const CustomPolygon = ({
               polygonId: line.polygonId,
             });
             intersectingLines.push(line);
-            return true;
+            foundIntersectingLine = true;
           }
-
-          return false;
         });
+
+        return foundIntersectingLine;
       });
 
       if (snapVectors.length > 0) {
-        const translatedPolygon = transformTranslate(
-          rotatedData,
-          snapVectors[0].dist,
-          snapVectors[0].bearing,
-          { units: "meters" }
-        );
+        // apply all vector translations to snap in multiple directions
+        const translatedPolygon = snapVectors.reduce((polygon, vector) => {
+          return transformTranslate(polygon, vector.dist, vector.bearing, {
+            units: "meters",
+          });
+        }, rotatedData);
+
         translatedPolygon.id = `${id}-snap`;
         setSnapPolygon(translatedPolygon);
-        console.log("snapPolygon", snapPolygon);
       } else {
         setSnapPolygon(null);
       }

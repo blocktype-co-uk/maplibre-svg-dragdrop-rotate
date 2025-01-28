@@ -36,8 +36,8 @@ export const MapContainer = ({
       feature: createPolygonAtAPoint({
         lat: 51.51406,
         lng: -0.12248,
-        width: 10,
-        height: 15,
+        width: 12,
+        height: 20,
       }),
       active: false,
       angle: 0,
@@ -118,9 +118,12 @@ export const MapContainer = ({
       });
 
       const lines = turf
-        .transformScale(turf.lineSegment(rotated), 3)
+        .transformScale(turf.lineSegment(rotated), 2)
         .features.map((line) => ({
-          feature: line,
+          feature: {
+            ...line,
+            id: `${polygon.feature.properties.id}-${line.id}`,
+          },
           polygonId: polygon.feature.properties.id,
         }));
 
@@ -251,8 +254,9 @@ export const MapContainer = ({
               type="line"
               paint={{
                 "line-color": "red",
-                "line-width": 1,
+                "line-width": 0.5,
                 "line-opacity": 1,
+                "line-dasharray": [2, 5],
               }}
             />
           </Source>
