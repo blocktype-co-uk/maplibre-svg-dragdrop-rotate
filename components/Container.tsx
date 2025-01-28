@@ -15,8 +15,8 @@ export const Container = ({}) => {
             value={[snapRadiusMetres]}
             onValueChange={(value) => setSnapRadiusMetres(value[0])}
             min={0}
-            max={10}
-            step={0.1}
+            max={5}
+            step={0.01}
           />
           <Text size="1">{snapRadiusMetres.toFixed(2)}&nbsp;(m)</Text>
         </Flex>

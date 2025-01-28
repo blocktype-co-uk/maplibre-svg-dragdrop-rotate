@@ -1,5 +1,5 @@
 "use client";
-import * as React from "react";
+import { useState } from "react";
 import Map, { Layer, Source } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
@@ -8,7 +8,6 @@ import {
 } from "@/components/CustomPolygon";
 import { useEffect, useMemo, useRef } from "react";
 import { createPolygonAtAPoint } from "@/tools/createPolygonAtAPoint";
-import { Flex, Slider, Text } from "@radix-ui/themes";
 import * as turf from "@turf/turf";
 
 export type PolygonObj = {
@@ -32,7 +31,7 @@ export const MapContainer = ({
 }: {
   snapRadiusMetres: number;
 }) => {
-  const [polygons, setPolygons] = React.useState<PolygonObj[]>([
+  const [polygons, setPolygons] = useState<PolygonObj[]>([
     {
       feature: createPolygonAtAPoint({
         lat: 51.51406,
@@ -57,8 +56,8 @@ export const MapContainer = ({
       feature: createPolygonAtAPoint({
         lat: 51.51416,
         lng: -0.12248,
-        width: 10,
-        height: 15,
+        width: 7.5,
+        height: 10,
       }),
       active: false,
       angle: 0,
@@ -67,33 +66,44 @@ export const MapContainer = ({
       feature: createPolygonAtAPoint({
         lat: 51.5142,
         lng: -0.1228,
-        width: 15,
-        height: 10,
+        width: 5,
+        height: 20,
       }),
       active: false,
       angle: 0,
     },
   ]);
-  const [lines, setLines] = React.useState<PolygonDerivativeLine[]>([]);
-  const [points, setPoints] = React.useState<PolygonDerivativePoint[]>([]);
-  const [intersectingPoints, setIntersectingPoints] = React.useState<
+  const [lines, setLines] = useState<PolygonDerivativeLine[]>([]);
+  const [points, setPoints] = useState<PolygonDerivativePoint[]>([]);
+  const [intersectingPoints, setIntersectingPoints] = useState<
     PolygonDerivativePoint[]
   >([]);
-  const [intersectingLines, setIntersectingLines] = React.useState<
+  const [intersectingLines, setIntersectingLines] = useState<
     PolygonDerivativeLine[]
   >([]);
+  const [snapLines, setSnapLines] = useState<PolygonDerivativeLine[]>([]);
+  const [snapPolygon, setSnapPolygon] =
+    useState<GeoJSON.Feature<GeoJSON.Polygon> | null>(null);
 
   const intersectingPointFeatures = useMemo(() => {
-    return intersectingPoints.map((point) =>
-      turf.circle(point.feature, snapRadiusMetres, {
-        units: "meters",
-      })
+    return turf.featureCollection(
+      intersectingPoints.map((point) =>
+        turf.circle(point.feature, snapRadiusMetres, {
+          units: "meters",
+        })
+      )
     );
-  }, [intersectingPoints]);
+  }, [intersectingPoints, snapRadiusMetres]);
 
   const intersectingLineFeatures = useMemo(() => {
-    return intersectingLines.map((line) => line.feature);
+    return turf.featureCollection(
+      intersectingLines.map((line) => line.feature)
+    );
   }, [intersectingLines]);
+
+  const snapLineFeatures = useMemo(() => {
+    return turf.featureCollection(snapLines.map((line) => line.feature));
+  }, [snapLines]);
 
   useEffect(() => computeGuides(), [polygons, snapRadiusMetres]);
 
@@ -211,26 +221,12 @@ export const MapContainer = ({
               onUpdate={handlePolygonUpdate}
               onIntersectingPointsUpdate={setIntersectingPoints}
               onIntersectingLinesUpdate={setIntersectingLines}
+              onSnapLinesUpdate={setSnapLines}
+              onSnapPolygonUpdate={setSnapPolygon}
             />
           ))}
 
-          {/* <Source
-          type="geojson"
-          data={{}}
-        >
-          <Layer
-            type="line"
-            paint={{
-              "line-color": "blue",
-              "line-width": 1,
-              "line-opacity": 0.2,
-            }}
-          />
-        </Source> */}
-          <Source
-            type="geojson"
-            data={turf.featureCollection(intersectingPointFeatures)}
-          >
+          <Source type="geojson" data={intersectingPointFeatures}>
             <Layer
               type="circle"
               paint={{
@@ -240,15 +236,34 @@ export const MapContainer = ({
               }}
             />
           </Source>
-          <Source
-            type="geojson"
-            data={turf.featureCollection(intersectingLineFeatures)}
-          >
+          {/* <Source type="geojson" data={intersectingLineFeatures}>
             <Layer
               type="line"
-              paint={{ "line-color": "red", "line-width": 2 }}
+              paint={{
+                "line-color": "red",
+                "line-width": 1,
+                "line-opacity": 0.5,
+              }}
+            />
+          </Source> */}
+          <Source type="geojson" data={snapLineFeatures}>
+            <Layer
+              type="line"
+              paint={{
+                "line-color": "red",
+                "line-width": 1,
+                "line-opacity": 1,
+              }}
             />
           </Source>
+          {snapPolygon && (
+            <Source type="geojson" data={snapPolygon}>
+              <Layer
+                type="fill"
+                paint={{ "fill-color": "red", "fill-opacity": 0.2 }}
+              />
+            </Source>
+          )}
         </Map>
       </div>
     </>

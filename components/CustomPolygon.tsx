@@ -10,8 +10,6 @@ import {
   lineString,
   transformTranslate,
   distance,
-  featureCollection,
-  nearestPointToLine,
   nearestPointOnLine,
 } from "@turf/turf";
 import {
@@ -19,8 +17,6 @@ import {
   PolygonDerivativePoint,
   PolygonObj,
 } from "./MapContainer";
-
-import { uniqBy } from "lodash";
 
 export type FeaturePolygonWithProps = GeoJSON.Feature & {
   geometry: GeoJSON.Polygon;
@@ -41,6 +37,8 @@ type CustomPolygonProps = {
   onUpdate: (polygonData: PolygonObj) => void;
   onIntersectingPointsUpdate: (points: PolygonDerivativePoint[]) => void;
   onIntersectingLinesUpdate: (lines: PolygonDerivativeLine[]) => void;
+  onSnapLinesUpdate: (lines: PolygonDerivativeLine[]) => void;
+  onSnapPolygonUpdate: (polygon: FeaturePolygonWithProps | null) => void;
 };
 
 export const CustomPolygon = ({
@@ -53,6 +51,8 @@ export const CustomPolygon = ({
   onDelete,
   onIntersectingPointsUpdate,
   onIntersectingLinesUpdate,
+  onSnapLinesUpdate,
+  onSnapPolygonUpdate,
   onUpdate,
 }: CustomPolygonProps) => {
   const polygonCenter = useMemo(
@@ -89,41 +89,73 @@ export const CustomPolygon = ({
     [polygonCenter, onUpdate]
   );
 
-  const intersectingPoints = useMemo(() => {
-    // find all points (not including the points of this polygon) that intersect with the lines of this polygon
-    const otherPoints = points.filter((point) => point.polygonId !== id);
-    const pts = featureCollection(otherPoints.map((point) => point.feature));
-    const linesToCheck = lines.filter((line) => line.polygonId === id);
-
-    const intersectingLines: PolygonDerivativeLine[] = [];
-    const intersectingPoints = otherPoints.filter((point) => {
-      return linesToCheck.some((line) => {
-        const closestPoint = nearestPointOnLine(line.feature, point.feature, {
-          units: "meters",
-        });
-
-        if (closestPoint.properties.dist < snapRadiusMetres) {
-          intersectingLines.push(line);
-          return true;
-        }
-
-        return false;
-      });
-    });
-
-    if (geojson.active) {
-      onIntersectingPointsUpdate(intersectingPoints);
-      onIntersectingLinesUpdate(intersectingLines);
-    }
-
-    return intersectingPoints;
-  }, [geojson.active, points, lines]);
+  const [snapPolygon, setSnapPolygon] =
+    useState<FeaturePolygonWithProps | null>(null);
 
   const handlePolygonDrag = useCallback(
     (event: any) => {
       const { lngLat } = event;
 
       const newCenter = [lngLat.lng, lngLat.lat];
+      // find all points (not including the points of this polygon) that intersect with the lines of this polygon
+      const otherPoints = points.filter((point) => point.polygonId !== id);
+      const linesToCheck = lines.filter((line) => line.polygonId === id);
+
+      const intersectingLines: PolygonDerivativeLine[] = [];
+      const snapLines: PolygonDerivativeLine[] = [];
+      const snapVectors: { dist: number; bearing: number }[] = [];
+      const intersectingPoints = otherPoints.filter((point) => {
+        return linesToCheck.some((line) => {
+          if (line.polygonId === point.polygonId) return false;
+
+          const closestPoint = nearestPointOnLine(line.feature, point.feature, {
+            units: "meters",
+          });
+
+          if (closestPoint.properties.dist < snapRadiusMetres) {
+            const snapVector = {
+              dist: closestPoint.properties.dist,
+              bearing: bearing(
+                closestPoint.geometry.coordinates,
+                point.feature.geometry.coordinates
+              ),
+            };
+            snapVectors.push(snapVector);
+
+            snapLines.push({
+              feature: transformTranslate(
+                line.feature,
+                snapVector.dist,
+                snapVector.bearing,
+                { units: "meters" }
+              ),
+              polygonId: line.polygonId,
+            });
+            intersectingLines.push(line);
+            return true;
+          }
+
+          return false;
+        });
+      });
+
+      if (snapVectors.length > 0) {
+        const translatedPolygon = transformTranslate(
+          rotatedData,
+          snapVectors[0].dist,
+          snapVectors[0].bearing,
+          { units: "meters" }
+        );
+        translatedPolygon.id = `${id}-snap`;
+        setSnapPolygon(translatedPolygon);
+        console.log("snapPolygon", snapPolygon);
+      } else {
+        setSnapPolygon(null);
+      }
+
+      onIntersectingPointsUpdate(intersectingPoints);
+      onIntersectingLinesUpdate(intersectingLines);
+      onSnapLinesUpdate(snapLines);
 
       const newData = transformTranslate(
         geojson.feature,
@@ -133,22 +165,26 @@ export const CustomPolygon = ({
 
       onUpdate({ ...geojson, feature: newData });
     },
-    [
-      geojson,
-      polygonCenter,
-      intersectingPoints,
-      onUpdate,
-      onIntersectingPointsUpdate,
-    ]
+    [geojson]
   );
+
+  const handlePolygonDragEnd = useCallback(() => {
+    if (snapPolygon) {
+      onUpdate({ ...geojson, feature: snapPolygon });
+      setSnapPolygon(null);
+      onIntersectingPointsUpdate([]);
+      onIntersectingLinesUpdate([]);
+      onSnapLinesUpdate([]);
+    }
+  }, [snapPolygon, geojson, onUpdate]);
 
   return (
     <div className="border border-blue-800">
-      <Source type="geojson" data={rotatedData}>
+      <Source type="geojson" data={snapPolygon ? snapPolygon : rotatedData}>
         <Layer
           type="fill"
           paint={{
-            "fill-color": "gray",
+            "fill-color": snapPolygon ? "red" : "gray",
             "fill-opacity": 0.2,
           }}
         />
@@ -171,6 +207,7 @@ export const CustomPolygon = ({
             latitude={polygonCenter[1]}
             draggable
             onDrag={handlePolygonDrag}
+            onDragEnd={handlePolygonDragEnd}
           >
             <div
               style={{
