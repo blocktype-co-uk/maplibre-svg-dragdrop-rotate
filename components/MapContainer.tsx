@@ -75,11 +75,9 @@ export const MapContainer = ({
   ]);
   const [lines, setLines] = useState<PolygonDerivativeLine[]>([]);
   const [points, setPoints] = useState<PolygonDerivativePoint[]>([]);
+  const [bearings, setBearings] = useState<number[]>([]);
   const [intersectingPoints, setIntersectingPoints] = useState<
     PolygonDerivativePoint[]
-  >([]);
-  const [intersectingLines, setIntersectingLines] = useState<
-    PolygonDerivativeLine[]
   >([]);
   const [snapLines, setSnapLines] = useState<PolygonDerivativeLine[]>([]);
   const [snapPolygon, setSnapPolygon] =
@@ -94,12 +92,6 @@ export const MapContainer = ({
       )
     );
   }, [intersectingPoints, snapRadiusMetres]);
-
-  const intersectingLineFeatures = useMemo(() => {
-    return turf.featureCollection(
-      intersectingLines.map((line) => line.feature)
-    );
-  }, [intersectingLines]);
 
   const snapLineFeatures = useMemo(() => {
     return turf.featureCollection(snapLines.map((line) => line.feature));
@@ -223,9 +215,7 @@ export const MapContainer = ({
               }}
               onUpdate={handlePolygonUpdate}
               onIntersectingPointsUpdate={setIntersectingPoints}
-              onIntersectingLinesUpdate={setIntersectingLines}
               onSnapLinesUpdate={setSnapLines}
-              onSnapPolygonUpdate={setSnapPolygon}
             />
           ))}
 
@@ -239,16 +229,6 @@ export const MapContainer = ({
               }}
             />
           </Source>
-          {/* <Source type="geojson" data={intersectingLineFeatures}>
-            <Layer
-              type="line"
-              paint={{
-                "line-color": "red",
-                "line-width": 1,
-                "line-opacity": 0.5,
-              }}
-            />
-          </Source> */}
           <Source type="geojson" data={snapLineFeatures}>
             <Layer
               type="line"

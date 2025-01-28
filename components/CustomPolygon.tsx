@@ -36,9 +36,7 @@ type CustomPolygonProps = {
   onDelete: () => void;
   onUpdate: (polygonData: PolygonObj) => void;
   onIntersectingPointsUpdate: (points: PolygonDerivativePoint[]) => void;
-  onIntersectingLinesUpdate: (lines: PolygonDerivativeLine[]) => void;
   onSnapLinesUpdate: (lines: PolygonDerivativeLine[]) => void;
-  onSnapPolygonUpdate: (polygon: FeaturePolygonWithProps | null) => void;
 };
 
 export const CustomPolygon = ({
@@ -50,9 +48,7 @@ export const CustomPolygon = ({
   snapRadiusMetres,
   onDelete,
   onIntersectingPointsUpdate,
-  onIntersectingLinesUpdate,
   onSnapLinesUpdate,
-  onSnapPolygonUpdate,
   onUpdate,
 }: CustomPolygonProps) => {
   const polygonCenter = useMemo(
@@ -101,7 +97,6 @@ export const CustomPolygon = ({
       const otherPoints = points.filter((point) => point.polygonId !== id);
       const linesToCheck = lines.filter((line) => line.polygonId === id);
 
-      const intersectingLines: PolygonDerivativeLine[] = [];
       const snapLines: PolygonDerivativeLine[] = [];
       const snapVectors: { dist: number; bearing: number }[] = [];
       const seenLines: Set<string | number> = new Set();
@@ -139,7 +134,6 @@ export const CustomPolygon = ({
               ),
               polygonId: line.polygonId,
             });
-            intersectingLines.push(line);
             foundIntersectingLine = true;
           }
         });
@@ -162,7 +156,6 @@ export const CustomPolygon = ({
       }
 
       onIntersectingPointsUpdate(intersectingPoints);
-      onIntersectingLinesUpdate(intersectingLines);
       onSnapLinesUpdate(snapLines);
 
       const newData = transformTranslate(
@@ -178,13 +171,17 @@ export const CustomPolygon = ({
 
   const handlePolygonDragEnd = useCallback(() => {
     if (snapPolygon) {
-      onUpdate({ ...geojson, feature: snapPolygon });
+      // snapPolygon is rotated, we need to rotate it back since geojson includes the rotation angle separately
+      const pivot = getCoord(centroid(snapPolygon));
+      const unrotatedPolygon = transformRotate(snapPolygon, -geojson.angle, {
+        pivot,
+      });
+      onUpdate({ ...geojson, feature: unrotatedPolygon });
       setSnapPolygon(null);
       onIntersectingPointsUpdate([]);
-      onIntersectingLinesUpdate([]);
       onSnapLinesUpdate([]);
     }
-  }, [snapPolygon, geojson, onUpdate]);
+  }, [snapPolygon, geojson]);
 
   return (
     <div className="border border-blue-800">
