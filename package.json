@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@radix-ui/themes": "^3.2.0",
     "@turf/turf": "^7.0.0",
     "@types/lodash": "^4.17.7",
     "lodash": "^4.17.21",

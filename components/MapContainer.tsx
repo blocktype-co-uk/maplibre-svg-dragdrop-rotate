@@ -8,6 +8,7 @@ import {
 } from "@/components/CustomPolygon";
 import { useEffect, useMemo, useRef } from "react";
 import { createPolygonAtAPoint } from "@/tools/createPolygonAtAPoint";
+import { Flex, Slider, Text } from "@radix-ui/themes";
 import * as turf from "@turf/turf";
 
 export type PolygonObj = {
@@ -26,8 +27,11 @@ export type PolygonDerivativePoint = {
   polygonId: string;
 };
 
-export const MapContainer = () => {
-  const [snapRadiusMetres, setSnapRadiusMetres] = React.useState(0.5);
+export const MapContainer = ({
+  snapRadiusMetres,
+}: {
+  snapRadiusMetres: number;
+}) => {
   const [polygons, setPolygons] = React.useState<PolygonObj[]>([
     {
       feature: createPolygonAtAPoint({
@@ -43,6 +47,26 @@ export const MapContainer = () => {
       feature: createPolygonAtAPoint({
         lat: 51.5142,
         lng: -0.1225,
+        width: 15,
+        height: 10,
+      }),
+      active: false,
+      angle: 0,
+    },
+    {
+      feature: createPolygonAtAPoint({
+        lat: 51.51416,
+        lng: -0.12248,
+        width: 10,
+        height: 15,
+      }),
+      active: false,
+      angle: 0,
+    },
+    {
+      feature: createPolygonAtAPoint({
+        lat: 51.5142,
+        lng: -0.1228,
         width: 15,
         height: 10,
       }),
@@ -71,7 +95,7 @@ export const MapContainer = () => {
     return intersectingLines.map((line) => line.feature);
   }, [intersectingLines]);
 
-  useEffect(() => computeGuides(), [polygons]);
+  useEffect(() => computeGuides(), [polygons, snapRadiusMetres]);
 
   const computeGuides = () => {
     const newLines: PolygonDerivativeLine[] = [];
@@ -92,10 +116,13 @@ export const MapContainer = () => {
 
       newLines.push(...lines);
 
-      const points = turf.explode(rotated).features.map((point) => ({
-        feature: point,
-        polygonId: polygon.feature.properties.id,
-      }));
+      const points = turf
+        .explode(rotated)
+        .features.slice(0, -1)
+        .map((point) => ({
+          feature: point,
+          polygonId: polygon.feature.properties.id,
+        }));
 
       newPoints.push(...points);
     });
@@ -152,43 +179,44 @@ export const MapContainer = () => {
   };
 
   return (
-    <div className="w-full h-full">
-      <Map
-        ref={mapRef}
-        initialViewState={{
-          longitude: -0.12249096587602795,
-          latitude: 51.51417051192398,
-          zoom: 19,
-        }}
-        mapStyle="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"
-        onClick={handleMapClick}
-      >
-        {polygons.map((polygon) => (
-          <CustomPolygon
-            id={polygon.feature.properties.id}
-            label={polygon.feature.properties.id}
-            key={polygon.feature.properties.id} // Use the unique id as the key
-            geojson={polygon}
-            points={points}
-            lines={lines}
-            snapRadiusMetres={snapRadiusMetres}
-            onDelete={() => {
-              setPolygons((prev) =>
-                prev.filter(
-                  (p) =>
-                    p.feature.properties.id !== polygon.feature.properties.id
-                )
-              );
-            }}
-            onUpdate={handlePolygonUpdate}
-            onIntersectingPointsUpdate={setIntersectingPoints}
-            onIntersectingLinesUpdate={setIntersectingLines}
-          />
-        ))}
+    <>
+      <div className="w-full h-full">
+        <Map
+          ref={mapRef}
+          initialViewState={{
+            longitude: -0.12249096587602795,
+            latitude: 51.51417051192398,
+            zoom: 19,
+          }}
+          mapStyle="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"
+          onClick={handleMapClick}
+        >
+          {polygons.map((polygon) => (
+            <CustomPolygon
+              id={polygon.feature.properties.id}
+              label={polygon.feature.properties.id}
+              key={polygon.feature.properties.id} // Use the unique id as the key
+              geojson={polygon}
+              points={points}
+              lines={lines}
+              snapRadiusMetres={snapRadiusMetres}
+              onDelete={() => {
+                setPolygons((prev) =>
+                  prev.filter(
+                    (p) =>
+                      p.feature.properties.id !== polygon.feature.properties.id
+                  )
+                );
+              }}
+              onUpdate={handlePolygonUpdate}
+              onIntersectingPointsUpdate={setIntersectingPoints}
+              onIntersectingLinesUpdate={setIntersectingLines}
+            />
+          ))}
 
-        <Source
+          {/* <Source
           type="geojson"
-          data={turf.featureCollection(lines.map((line) => line.feature))}
+          data={{}}
         >
           <Layer
             type="line"
@@ -198,27 +226,31 @@ export const MapContainer = () => {
               "line-opacity": 0.2,
             }}
           />
-        </Source>
-        <Source
-          type="geojson"
-          data={turf.featureCollection(intersectingPointFeatures)}
-        >
-          <Layer
-            type="circle"
-            paint={{
-              "circle-radius": 1,
-              "circle-color": "red",
-              "circle-opacity": 0.5,
-            }}
-          />
-        </Source>
-        <Source
-          type="geojson"
-          data={turf.featureCollection(intersectingLineFeatures)}
-        >
-          <Layer type="line" paint={{ "line-color": "red", "line-width": 2 }} />
-        </Source>
-      </Map>
-    </div>
+        </Source> */}
+          <Source
+            type="geojson"
+            data={turf.featureCollection(intersectingPointFeatures)}
+          >
+            <Layer
+              type="circle"
+              paint={{
+                "circle-radius": 1,
+                "circle-color": "red",
+                "circle-opacity": 0.5,
+              }}
+            />
+          </Source>
+          <Source
+            type="geojson"
+            data={turf.featureCollection(intersectingLineFeatures)}
+          >
+            <Layer
+              type="line"
+              paint={{ "line-color": "red", "line-width": 2 }}
+            />
+          </Source>
+        </Map>
+      </div>
+    </>
   );
 };

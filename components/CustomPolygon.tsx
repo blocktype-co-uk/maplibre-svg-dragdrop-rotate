@@ -12,6 +12,7 @@ import {
   distance,
   featureCollection,
   nearestPointToLine,
+  nearestPointOnLine,
 } from "@turf/turf";
 import {
   PolygonDerivativeLine,
@@ -91,41 +92,27 @@ export const CustomPolygon = ({
   const intersectingPoints = useMemo(() => {
     // find all points (not including the points of this polygon) that intersect with the lines of this polygon
     const otherPoints = points.filter((point) => point.polygonId !== id);
-    const uniqueOtherPoints = uniqBy(
-      otherPoints,
-      "feature.geometry.coordinates"
-    );
-    if (uniqueOtherPoints.length !== otherPoints.length) {
-      console.log("removed duplicate points", otherPoints, uniqueOtherPoints);
-    }
-    const pts = featureCollection(
-      uniqueOtherPoints.map((point) => point.feature)
-    );
+    const pts = featureCollection(otherPoints.map((point) => point.feature));
     const linesToCheck = lines.filter((line) => line.polygonId === id);
 
     const intersectingLines: PolygonDerivativeLine[] = [];
-    const intersectingPoints = linesToCheck.flatMap((line) => {
-      const closestPoint = nearestPointToLine(pts, line.feature, {
-        units: "meters",
+    const intersectingPoints = otherPoints.filter((point) => {
+      return linesToCheck.some((line) => {
+        const closestPoint = nearestPointOnLine(line.feature, point.feature, {
+          units: "meters",
+        });
+
+        if (closestPoint.properties.dist < snapRadiusMetres) {
+          intersectingLines.push(line);
+          return true;
+        }
+
+        return false;
       });
-
-      if (closestPoint.properties.dist < snapRadiusMetres) {
-        intersectingLines.push(line);
-        return [closestPoint];
-      }
-
-      return [];
     });
 
     if (geojson.active) {
-      console.log("found intersecting points", intersectingPoints);
-      console.log("found intersecting lines", intersectingLines);
-      onIntersectingPointsUpdate(
-        intersectingPoints.map((point) => ({
-          feature: point,
-          polygonId: id,
-        }))
-      );
+      onIntersectingPointsUpdate(intersectingPoints);
       onIntersectingLinesUpdate(intersectingLines);
     }
 
@@ -137,21 +124,6 @@ export const CustomPolygon = ({
       const { lngLat } = event;
 
       const newCenter = [lngLat.lng, lngLat.lat];
-
-      if (intersectingPoints.length > 0) {
-        const snapPoint = intersectingPoints[0];
-        const distanceToSnapPoint = snapPoint.properties.dist;
-        const bearingToSnapPoint = bearing(polygonCenter, getCoord(snapPoint));
-
-        const newSnappedCenter = destination(
-          point(polygonCenter),
-          distanceToSnapPoint,
-          bearingToSnapPoint,
-          {
-            units: "meters",
-          }
-        ).geometry.coordinates;
-      }
 
       const newData = transformTranslate(
         geojson.feature,
