@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Map, { Layer, Source } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
@@ -28,8 +28,12 @@ export type PolygonDerivativePoint = {
 
 export const MapContainer = ({
   snapRadiusMetres,
+  snapGuideRatio,
+  snapAngleDistance,
 }: {
   snapRadiusMetres: number;
+  snapGuideRatio: number;
+  snapAngleDistance: number;
 }) => {
   const [polygons, setPolygons] = useState<PolygonObj[]>([
     {
@@ -65,23 +69,45 @@ export const MapContainer = ({
     {
       feature: createPolygonAtAPoint({
         lat: 51.5142,
-        lng: -0.1228,
+        lng: -0.1229,
         width: 5,
         height: 20,
       }),
       active: false,
       angle: 0,
     },
+    {
+      feature: createPolygonAtAPoint({
+        lat: 51.5142,
+        lng: -0.1222,
+        width: 5,
+        height: 20,
+      }),
+      active: false,
+      angle: 20,
+    },
+    {
+      feature: createPolygonAtAPoint({
+        lat: 51.514,
+        lng: -0.123,
+        width: 5,
+        height: 20,
+      }),
+      active: false,
+      angle: 40,
+    },
   ]);
-  const [lines, setLines] = useState<PolygonDerivativeLine[]>([]);
   const [points, setPoints] = useState<PolygonDerivativePoint[]>([]);
-  const [bearings, setBearings] = useState<number[]>([]);
+  const [lines, setLines] = useState<PolygonDerivativeLine[]>([]);
+  const [bearings, setBearings] = useState<
+    Record<number, PolygonDerivativeLine[]>
+  >({});
   const [intersectingPoints, setIntersectingPoints] = useState<
     PolygonDerivativePoint[]
   >([]);
+
   const [snapLines, setSnapLines] = useState<PolygonDerivativeLine[]>([]);
-  const [snapPolygon, setSnapPolygon] =
-    useState<GeoJSON.Feature<GeoJSON.Polygon> | null>(null);
+  const [snapBearings, setSnapBearings] = useState<PolygonDerivativeLine[]>([]);
 
   const intersectingPointFeatures = useMemo(() => {
     return turf.featureCollection(
@@ -97,11 +123,18 @@ export const MapContainer = ({
     return turf.featureCollection(snapLines.map((line) => line.feature));
   }, [snapLines]);
 
-  useEffect(() => computeGuides(), [polygons, snapRadiusMetres]);
+  const snapBearingsFeatures = useMemo(() => {
+    return turf.featureCollection(
+      Object.values(snapBearings)
+        .flat()
+        .map((line) => line.feature)
+    );
+  }, [snapBearings]);
 
-  const computeGuides = () => {
+  const computeGuides = useCallback(() => {
     const newLines: PolygonDerivativeLine[] = [];
     const newPoints: PolygonDerivativePoint[] = [];
+    setBearings({});
 
     polygons.forEach((polygon) => {
       const polygonCenter = turf.getCoord(turf.centroid(polygon.feature));
@@ -109,8 +142,13 @@ export const MapContainer = ({
         pivot: polygonCenter,
       });
 
+      // bearings are in the range [-180, 180], we want to clamp the angles to [0, 180)
+      // so that it doesn't matter which side of the polygon the bearing is on
+      let bearing = (180 + Math.round(polygon.angle)) % 180;
+      let normal = Math.round(bearing + 90) % 180;
+
       const lines = turf
-        .transformScale(turf.lineSegment(rotated), 2)
+        .transformScale(turf.lineSegment(rotated), snapGuideRatio)
         .features.map((line) => ({
           feature: {
             ...line,
@@ -118,6 +156,12 @@ export const MapContainer = ({
           },
           polygonId: polygon.feature.properties.id,
         }));
+
+      setBearings((prev) => ({
+        ...prev,
+        [bearing]: [...(prev[bearing] || []), lines[0]],
+        [normal]: [...(prev[normal] || []), lines[1]],
+      }));
 
       newLines.push(...lines);
 
@@ -134,7 +178,9 @@ export const MapContainer = ({
 
     setLines(newLines);
     setPoints(newPoints);
-  };
+  }, [polygons, snapGuideRatio]);
+
+  useEffect(() => computeGuides(), [polygons, snapRadiusMetres, computeGuides]);
 
   const handlePolygonUpdate = (polygonData: PolygonObj) => {
     setPolygons((prev) =>
@@ -204,7 +250,9 @@ export const MapContainer = ({
               geojson={polygon}
               points={points}
               lines={lines}
+              bearings={bearings}
               snapRadiusMetres={snapRadiusMetres}
+              snapAngleDistance={snapAngleDistance}
               onDelete={() => {
                 setPolygons((prev) =>
                   prev.filter(
@@ -216,6 +264,7 @@ export const MapContainer = ({
               onUpdate={handlePolygonUpdate}
               onIntersectingPointsUpdate={setIntersectingPoints}
               onSnapLinesUpdate={setSnapLines}
+              onSnapBearingUpdate={setSnapBearings}
             />
           ))}
 
@@ -240,14 +289,16 @@ export const MapContainer = ({
               }}
             />
           </Source>
-          {snapPolygon && (
-            <Source type="geojson" data={snapPolygon}>
-              <Layer
-                type="fill"
-                paint={{ "fill-color": "red", "fill-opacity": 0.2 }}
-              />
-            </Source>
-          )}
+          <Source type="geojson" data={snapBearingsFeatures}>
+            <Layer
+              type="line"
+              paint={{
+                "line-color": "red",
+                "line-opacity": 0.5,
+                "line-width": 1,
+              }}
+            />
+          </Source>
         </Map>
       </div>
     </>

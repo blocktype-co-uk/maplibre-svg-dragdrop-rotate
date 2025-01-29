@@ -31,12 +31,15 @@ type CustomPolygonProps = {
   geojson: PolygonObj;
   points: PolygonDerivativePoint[];
   lines: PolygonDerivativeLine[];
+  bearings: { [key: number]: PolygonDerivativeLine[] };
   label: string;
   snapRadiusMetres: number;
+  snapAngleDistance: number;
   onDelete: () => void;
   onUpdate: (polygonData: PolygonObj) => void;
   onIntersectingPointsUpdate: (points: PolygonDerivativePoint[]) => void;
   onSnapLinesUpdate: (lines: PolygonDerivativeLine[]) => void;
+  onSnapBearingUpdate: (bearingLines: PolygonDerivativeLine[]) => void;
 };
 
 export const CustomPolygon = ({
@@ -44,11 +47,14 @@ export const CustomPolygon = ({
   geojson,
   label,
   lines,
+  bearings,
   points,
   snapRadiusMetres,
+  snapAngleDistance,
   onDelete,
   onIntersectingPointsUpdate,
   onSnapLinesUpdate,
+  onSnapBearingUpdate,
   onUpdate,
 }: CustomPolygonProps) => {
   const polygonCenter = useMemo(
@@ -56,10 +62,14 @@ export const CustomPolygon = ({
     [geojson]
   );
 
+  const [snapAngle, setSnapAngle] = useState<number | null>(null);
+
   const rotatedData = useMemo(
     () =>
-      transformRotate(geojson.feature, geojson.angle, { pivot: polygonCenter }),
-    [geojson, polygonCenter]
+      transformRotate(geojson.feature, snapAngle ?? geojson.angle, {
+        pivot: polygonCenter,
+      }),
+    [geojson, polygonCenter, snapAngle]
   );
 
   const markerPosition = useMemo(
@@ -75,15 +85,78 @@ export const CustomPolygon = ({
     [polygonCenter, markerPosition]
   );
 
+  /*
+   * Angle snapping algorithm
+   * 1. Each time the block rotation angle changes
+   * 2. Loop through bearings (bearings are constrained to [0, 180])
+   * 2.1 Find the distance between the new rotation angle and the bearing
+   * 2.2 If the distance is less than the snapAngleDistance AND we have not already seen a closer bearing
+   *        AND that bearing doesn't only have lines from the current polygon
+   *    - Then set the nearest bearing, nearest bearing distance and nearest bearing lines
+   *      (with lines from the current polygon filtered out)
+   */
   const handleMarkerDrag = useCallback(
     (event: any) => {
       const { lngLat } = event;
       const newPosition = [lngLat.lng, lngLat.lat];
-      const newRotation = bearing(polygonCenter, newPosition);
+      const newRotation = Math.round(bearing(polygonCenter, newPosition));
+      if (newRotation === geojson.angle) {
+        return;
+      }
+
+      let nearestBearing = null;
+      let nearestBearingDistance = Infinity;
+      let nearestBearingLines: PolygonDerivativeLine[] = [];
+
+      Object.keys(bearings).forEach((bearing) => {
+        const bearingInt = parseInt(bearing);
+
+        const clampedRotation = (180 + newRotation) % 180;
+
+        const dist = Math.abs(bearingInt - clampedRotation);
+        if (dist < snapAngleDistance && dist < nearestBearingDistance) {
+          const possibleNearestBearingLines = bearings[bearingInt].filter(
+            (bearing) => bearing.polygonId !== id
+          );
+
+          if (possibleNearestBearingLines.length > 0) {
+            nearestBearingLines = possibleNearestBearingLines;
+            nearestBearingDistance = dist;
+            nearestBearing = bearingInt;
+          }
+        }
+      });
+
+      onSnapBearingUpdate(nearestBearingLines);
+      setSnapAngle(nearestBearing);
       onUpdate({ ...geojson, angle: newRotation });
     },
-    [polygonCenter, onUpdate]
+    [
+      bearings,
+      geojson,
+      id,
+      onSnapBearingUpdate,
+      onUpdate,
+      polygonCenter,
+      setSnapAngle,
+      snapAngleDistance,
+    ]
   );
+
+  const handleMarkerDragEnd = useCallback(() => {
+    if (snapAngle !== null) {
+      const angle = geojson.angle < 0 ? snapAngle - 180 : snapAngle;
+      console.log(
+        "Rotation ended, setting angle to snapped angle: ",
+        angle,
+        " from ",
+        geojson.angle
+      );
+      onUpdate({ ...geojson, angle });
+    }
+    onSnapBearingUpdate([]);
+    setSnapAngle(null);
+  }, [onSnapBearingUpdate, setSnapAngle, snapAngle, geojson, onUpdate]);
 
   const [snapPolygon, setSnapPolygon] =
     useState<FeaturePolygonWithProps | null>(null);
@@ -166,7 +239,18 @@ export const CustomPolygon = ({
 
       onUpdate({ ...geojson, feature: newData });
     },
-    [geojson]
+    [
+      geojson,
+      id,
+      lines,
+      points,
+      polygonCenter,
+      rotatedData,
+      snapRadiusMetres,
+      onUpdate,
+      onIntersectingPointsUpdate,
+      onSnapLinesUpdate,
+    ]
   );
 
   const handlePolygonDragEnd = useCallback(() => {
@@ -181,7 +265,13 @@ export const CustomPolygon = ({
       onIntersectingPointsUpdate([]);
       onSnapLinesUpdate([]);
     }
-  }, [snapPolygon, geojson]);
+  }, [
+    snapPolygon,
+    geojson,
+    onUpdate,
+    onIntersectingPointsUpdate,
+    onSnapLinesUpdate,
+  ]);
 
   return (
     <div className="border border-blue-800">
@@ -299,6 +389,7 @@ export const CustomPolygon = ({
             latitude={markerPosition[1]}
             draggable
             onDrag={handleMarkerDrag}
+            onDragEnd={handleMarkerDragEnd}
           >
             <div
               style={{
