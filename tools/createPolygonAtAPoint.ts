@@ -7,6 +7,7 @@ type PolygonOptions = {
   lng: number;
   width: number;
   height: number;
+  polygonId?: string;
 };
 
 export const createPolygonAtAPoint = ({
@@ -14,6 +15,7 @@ export const createPolygonAtAPoint = ({
   lng,
   width,
   height,
+  polygonId,
 }: PolygonOptions) => {
   const halfWidth = width / 2 / 1000;
   const halfHeight = height / 2 / 1000;
@@ -46,10 +48,14 @@ export const createPolygonAtAPoint = ({
     topLeft.geometry.coordinates,
   ];
 
+  const id = nanoid(8);
   const polygon = turf.polygon([polygonCoords], {
-    id: nanoid(8),
+    id,
     type: "FeaturePolygonWithProps",
   });
 
-  return polygon as FeaturePolygonWithProps;
+  return {
+    ...polygon,
+    properties: { ...polygon.properties, polygonId: polygonId ?? id },
+  } satisfies FeaturePolygonWithProps;
 };

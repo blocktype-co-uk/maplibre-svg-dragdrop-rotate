@@ -4,9 +4,9 @@ import { Flex, Slider, Text } from "@radix-ui/themes";
 import { useState } from "react";
 
 export const Container = ({}) => {
-  const [snapRadiusMetres, setSnapRadiusMetres] = useState(0.5);
-  const [snapGuideRatio, setSnapGuideRatio] = useState(3);
-  const [snapAngleDistance, setSnapAngleDistance] = useState(3);
+  const [snapRadiusMetres, setSnapRadiusMetres] = useState(1);
+  const [snapGuideRatio, setSnapGuideRatio] = useState(7);
+  const [snapAngleDistance, setSnapAngleDistance] = useState(6);
 
   return (
     <div className="flex w-full">

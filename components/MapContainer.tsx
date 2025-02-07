@@ -9,6 +9,7 @@ import {
 import { useEffect, useMemo, useRef } from "react";
 import { createPolygonAtAPoint } from "@/tools/createPolygonAtAPoint";
 import * as turf from "@turf/turf";
+import { times } from "lodash";
 
 export type PolygonObj = {
   feature: FeaturePolygonWithProps;
@@ -16,15 +17,28 @@ export type PolygonObj = {
   angle: number;
 };
 
-export type PolygonDerivativeLine = {
-  feature: GeoJSON.Feature<GeoJSON.LineString>;
-  polygonId: string;
+export type PolygonDerivativeLine = GeoJSON.Feature<GeoJSON.LineString> & {
+  properties: {
+    polygonId: string;
+  };
 };
 
-export type PolygonDerivativePoint = {
-  feature: GeoJSON.Feature<GeoJSON.Point>;
-  polygonId: string;
+export type PolygonDerivativePoint = GeoJSON.Feature<GeoJSON.Point> & {
+  properties: {
+    polygonId: string;
+  };
 };
+
+const generateRandomPolygon = (): PolygonObj => ({
+  feature: createPolygonAtAPoint({
+    lat: 51.51 - Math.random() * 0.001,
+    lng: -0.12 - Math.random() * 0.01,
+    width: 10 + Math.random() * 10,
+    height: 10 + Math.random() * 20,
+  }),
+  active: false,
+  angle: 0,
+});
 
 export const MapContainer = ({
   snapRadiusMetres,
@@ -35,68 +49,13 @@ export const MapContainer = ({
   snapGuideRatio: number;
   snapAngleDistance: number;
 }) => {
-  const [polygons, setPolygons] = useState<PolygonObj[]>([
-    {
-      feature: createPolygonAtAPoint({
-        lat: 51.51406,
-        lng: -0.12248,
-        width: 12,
-        height: 20,
-      }),
-      active: false,
-      angle: 0,
-    },
-    {
-      feature: createPolygonAtAPoint({
-        lat: 51.5142,
-        lng: -0.1225,
-        width: 15,
-        height: 10,
-      }),
-      active: false,
-      angle: 0,
-    },
-    {
-      feature: createPolygonAtAPoint({
-        lat: 51.51416,
-        lng: -0.12248,
-        width: 7.5,
-        height: 10,
-      }),
-      active: false,
-      angle: 0,
-    },
-    {
-      feature: createPolygonAtAPoint({
-        lat: 51.5142,
-        lng: -0.1229,
-        width: 5,
-        height: 20,
-      }),
-      active: false,
-      angle: 0,
-    },
-    {
-      feature: createPolygonAtAPoint({
-        lat: 51.5142,
-        lng: -0.1222,
-        width: 5,
-        height: 20,
-      }),
-      active: false,
-      angle: 20,
-    },
-    {
-      feature: createPolygonAtAPoint({
-        lat: 51.514,
-        lng: -0.123,
-        width: 5,
-        height: 20,
-      }),
-      active: false,
-      angle: 40,
-    },
-  ]);
+  const [polygons, setPolygons] = useState<PolygonObj[]>(
+    times(100, generateRandomPolygon)
+  );
+
+  const centroid = turf.centerOfMass(
+    turf.featureCollection(polygons.map((p) => p.feature))
+  );
   const [points, setPoints] = useState<PolygonDerivativePoint[]>([]);
   const [lines, setLines] = useState<PolygonDerivativeLine[]>([]);
   const [bearings, setBearings] = useState<
@@ -105,6 +64,12 @@ export const MapContainer = ({
   const [intersectingPoints, setIntersectingPoints] = useState<
     PolygonDerivativePoint[]
   >([]);
+  const geospatialIndex = useMemo(() => {
+    const tree = turf.geojsonRbush();
+    tree.load(lines.map((l) => turf.clone(l)));
+
+    return tree;
+  }, [lines]);
 
   const [snapLines, setSnapLines] = useState<PolygonDerivativeLine[]>([]);
   const [snapBearings, setSnapBearings] = useState<PolygonDerivativeLine[]>([]);
@@ -112,7 +77,7 @@ export const MapContainer = ({
   const intersectingPointFeatures = useMemo(() => {
     return turf.featureCollection(
       intersectingPoints.map((point) =>
-        turf.circle(point.feature, snapRadiusMetres, {
+        turf.circle(point, snapRadiusMetres, {
           units: "meters",
         })
       )
@@ -120,14 +85,14 @@ export const MapContainer = ({
   }, [intersectingPoints, snapRadiusMetres]);
 
   const snapLineFeatures = useMemo(() => {
-    return turf.featureCollection(snapLines.map((line) => line.feature));
+    return turf.featureCollection(snapLines.map((line) => line));
   }, [snapLines]);
 
   const snapBearingsFeatures = useMemo(() => {
     return turf.featureCollection(
       Object.values(snapBearings)
         .flat()
-        .map((line) => line.feature)
+        .map((line) => line)
     );
   }, [snapBearings]);
 
@@ -150,11 +115,11 @@ export const MapContainer = ({
       const lines = turf
         .transformScale(turf.lineSegment(rotated), snapGuideRatio)
         .features.map((line) => ({
-          feature: {
-            ...line,
-            id: `${polygon.feature.properties.id}-${line.id}`,
+          ...line,
+          id: `${polygon.feature.properties.id}-${line.id}`,
+          properties: {
+            polygonId: polygon.feature.properties.id,
           },
-          polygonId: polygon.feature.properties.id,
         }));
 
       setBearings((prev) => ({
@@ -169,8 +134,10 @@ export const MapContainer = ({
         .explode(rotated)
         .features.slice(0, -1)
         .map((point) => ({
-          feature: point,
-          polygonId: polygon.feature.properties.id,
+          ...point,
+          properties: {
+            polygonId: polygon.feature.properties.id,
+          },
         }));
 
       newPoints.push(...points);
@@ -235,8 +202,8 @@ export const MapContainer = ({
         <Map
           ref={mapRef}
           initialViewState={{
-            longitude: -0.12249096587602795,
-            latitude: 51.51417051192398,
+            longitude: centroid.geometry.coordinates[0],
+            latitude: centroid.geometry.coordinates[1],
             zoom: 19,
           }}
           mapStyle="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"
@@ -253,7 +220,12 @@ export const MapContainer = ({
               bearings={bearings}
               snapRadiusMetres={snapRadiusMetres}
               snapAngleDistance={snapAngleDistance}
+              geospatialIndex={geospatialIndex}
               onDelete={() => {
+                geospatialIndex.remove(
+                  polygon.feature,
+                  (a, b) => a.properties?.polygonId === b.properties?.polygonId
+                );
                 setPolygons((prev) =>
                   prev.filter(
                     (p) =>
